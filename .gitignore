@@ -1,0 +1,6 @@
+node_modules/
+dist/
+.nodesage/
+*.bak
+*.js.map
+*.d.ts.map
