@@ -1,20 +1,4 @@
 import chalk from "chalk";
-import * as path from "path";
-import { ReviewResult, Finding } from "./reviewer.js";
-
-const SEVERITY_ICON = {
-  CRITICAL: chalk.red("●  CRITICAL"),
-  WARNING: chalk.yellow("●  WARNING"),
-  INFO: chalk.blue("●  INFO"),
-  OK: chalk.green("●  OK"),
-} as const;
-
-const SEVERITY_ORDER: Record<string, number> = {
-  CRITICAL: 0,
-  WARNING: 1,
-  INFO: 2,
-  OK: 3,
-};
 
 export function printHeader(): void {
   console.log();
@@ -23,7 +7,7 @@ export function printHeader(): void {
   );
   console.log(
     chalk.bold.cyan("  ║") +
-      chalk.bold.white("     🌿 NodeSage Code Review          ") +
+      chalk.bold.white("     NodeSage                          ") +
       chalk.bold.cyan("║")
   );
   console.log(
@@ -37,115 +21,46 @@ export function printHeader(): void {
   console.log();
 }
 
-export function printResults(results: ReviewResult[], cwd: string): void {
-  if (results.length === 0) {
-    console.log(chalk.green("  No files to review."));
-    return;
-  }
-
-  let totalCritical = 0;
-  let totalWarning = 0;
-  let totalInfo = 0;
-
-  for (const result of results) {
-    const relPath = path.relative(cwd, result.filePath);
-    const sortedFindings = [...result.findings].sort(
-      (a, b) =>
-        (SEVERITY_ORDER[a.severity] ?? 3) - (SEVERITY_ORDER[b.severity] ?? 3)
-    );
-
-    const hasIssues = sortedFindings.some((f) => f.severity !== "OK");
-
-    console.log(
-      chalk.bold.underline(`\n  📄 ${relPath}`) +
-        (hasIssues ? "" : chalk.green(" ✓"))
-    );
-    console.log();
-
-    for (const finding of sortedFindings) {
-      if (finding.severity === "OK") {
-        console.log(`    ${SEVERITY_ICON.OK} ${chalk.green(finding.title)}`);
-        continue;
-      }
-
-      if (finding.severity === "CRITICAL") totalCritical++;
-      else if (finding.severity === "WARNING") totalWarning++;
-      else totalInfo++;
-
-      const icon = SEVERITY_ICON[finding.severity] || SEVERITY_ICON.INFO;
-      const lineRange =
-        finding.startLine === finding.endLine
-          ? `L${finding.startLine}`
-          : `L${finding.startLine}-${finding.endLine}`;
-
-      console.log(`    ${icon}  ${chalk.bold(finding.title)} ${chalk.dim(`(${lineRange})`)}`);
-
-      if (finding.description) {
-        const wrapped = wrapText(finding.description, 70);
-        for (const line of wrapped) {
-          console.log(chalk.dim(`      ${line}`));
-        }
-      }
-
-      if (finding.fix) {
-        console.log(chalk.green(`      💡 Fix: `) + chalk.white(finding.fix));
-      }
-
-      console.log();
-    }
-  }
-
-  printSummary(totalCritical, totalWarning, totalInfo);
-}
-
-function printSummary(
-  critical: number,
-  warning: number,
-  info: number
-): void {
-  const total = critical + warning + info;
-
-  console.log(chalk.dim("  ──────────────────────────────────────"));
-  console.log(chalk.bold("\n  📊 Summary"));
-
-  if (total === 0) {
-    console.log(chalk.green("  ✅ No issues found. Code looks good!"));
-  } else {
-    if (critical > 0)
-      console.log(chalk.red(`     ${critical} critical issue${critical !== 1 ? "s" : ""}`));
-    if (warning > 0)
-      console.log(chalk.yellow(`     ${warning} warning${warning !== 1 ? "s" : ""}`));
-    if (info > 0)
-      console.log(chalk.blue(`     ${info} info${info !== 1 ? "s" : ""}`));
-    console.log(chalk.dim(`     ${total} total finding${total !== 1 ? "s" : ""}`));
-  }
-
+export function printChatWelcome(): void {
+  console.log();
+  console.log(
+    chalk.bold.cyan("  ╔══════════════════════════════════════╗")
+  );
+  console.log(
+    chalk.bold.cyan("  ║") +
+      chalk.bold.white("     NodeSage Chat                     ") +
+      chalk.bold.cyan("║")
+  );
+  console.log(
+    chalk.bold.cyan("  ║") +
+      chalk.dim("     Ask anything about your code      ") +
+      chalk.bold.cyan("║")
+  );
+  console.log(
+    chalk.bold.cyan("  ╚══════════════════════════════════════╝")
+  );
+  console.log();
+  console.log(chalk.dim("  Commands:"));
+  console.log(chalk.dim("    /fix <file>  - Fix a specific file"));
+  console.log(chalk.dim("    /clear       - Clear conversation history"));
+  console.log(chalk.dim("    /context     - Show last retrieved context"));
+  console.log(chalk.dim("    /help        - Show this help"));
+  console.log(chalk.dim("    /quit        - Exit chat"));
   console.log();
 }
 
-export function printProgress(current: number, total: number): void {
+export function printProgress(
+  current: number,
+  total: number,
+  label: string = "Processing"
+): void {
   const pct = Math.round((current / total) * 100);
   const barLen = 25;
   const filled = Math.round((current / total) * barLen);
   const bar = "█".repeat(filled) + "░".repeat(barLen - filled);
 
   process.stdout.write(
-    `\r  ${chalk.cyan("Reviewing")} ${bar} ${chalk.dim(`${pct}% (${current}/${total} chunks)`)}`
-  );
-
-  if (current === total) {
-    process.stdout.write("\n\n");
-  }
-}
-
-export function printInitProgress(current: number, total: number): void {
-  const pct = Math.round((current / total) * 100);
-  const barLen = 25;
-  const filled = Math.round((current / total) * barLen);
-  const bar = "█".repeat(filled) + "░".repeat(barLen - filled);
-
-  process.stdout.write(
-    `\r  ${chalk.cyan("Embedding")} ${bar} ${chalk.dim(`${pct}% (${current}/${total} chunks)`)}`
+    `\r  ${chalk.cyan(label)} ${bar} ${chalk.dim(`${pct}% (${current}/${total})`)}`
   );
 
   if (current === total) {
@@ -153,7 +68,92 @@ export function printInitProgress(current: number, total: number): void {
   }
 }
 
-function wrapText(text: string, maxWidth: number): string[] {
+export function printTrainSummary(stats: {
+  files: number;
+  codeChunks: number;
+  knowledgeChunks: number;
+  elapsed: number;
+}): void {
+  console.log();
+  console.log(chalk.bold.green("  Training complete!"));
+  console.log(chalk.dim(`    ${stats.files} files indexed`));
+  console.log(chalk.dim(`    ${stats.codeChunks} code chunks embedded`));
+  if (stats.knowledgeChunks > 0) {
+    console.log(
+      chalk.dim(`    ${stats.knowledgeChunks} knowledge chunks embedded`)
+    );
+  }
+  console.log(
+    chalk.dim(`    ${(stats.elapsed / 1000).toFixed(1)}s elapsed`)
+  );
+  console.log();
+  console.log(chalk.cyan('  Run "nodesage chat" to start asking questions'));
+  console.log();
+}
+
+export function printDiff(
+  original: string,
+  fixed: string,
+  filePath: string
+): void {
+  const originalLines = original.split("\n");
+  const fixedLines = fixed.split("\n");
+
+  const maxLines = Math.max(originalLines.length, fixedLines.length);
+  let diffCount = 0;
+  const contextLines = 2;
+  const changedLines: Set<number> = new Set();
+
+  for (let i = 0; i < maxLines; i++) {
+    const orig = originalLines[i] ?? "";
+    const fix = fixedLines[i] ?? "";
+    if (orig !== fix) {
+      changedLines.add(i);
+      for (
+        let c = Math.max(0, i - contextLines);
+        c <= Math.min(maxLines - 1, i + contextLines);
+        c++
+      ) {
+        changedLines.add(c);
+      }
+    }
+  }
+
+  if (changedLines.size === 0) {
+    console.log(chalk.dim("    No changes detected."));
+    return;
+  }
+
+  console.log(chalk.bold.underline(`\n  ${filePath}`));
+  console.log();
+
+  let lastPrinted = -2;
+  const sortedLines = [...changedLines].sort((a, b) => a - b);
+
+  for (const i of sortedLines) {
+    if (i > lastPrinted + 1) {
+      console.log(chalk.dim("    ..."));
+    }
+    lastPrinted = i;
+
+    const orig = originalLines[i] ?? "";
+    const fix = fixedLines[i] ?? "";
+    const lineNum = String(i + 1).padStart(4);
+
+    if (orig !== fix) {
+      diffCount++;
+      if (orig) console.log(chalk.red(`  ${lineNum} - ${orig}`));
+      if (fix) console.log(chalk.green(`  ${lineNum} + ${fix}`));
+    } else {
+      console.log(chalk.dim(`  ${lineNum}   ${orig}`));
+    }
+  }
+
+  console.log();
+  console.log(chalk.dim(`    ${diffCount} line(s) changed`));
+}
+
+export function wrapText(text: string, maxWidth: number): string[] {
   const words = text.split(/\s+/);
   const lines: string[] = [];
   let current = "";

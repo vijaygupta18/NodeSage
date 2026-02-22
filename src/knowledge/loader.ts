@@ -1,6 +1,10 @@
 import * as fs from "fs/promises";
 import * as path from "path";
-import { KnowledgeItem } from "./store.js";
+export interface KnowledgeItem {
+  text: string;
+  source: string;
+  section: string;
+}
 
 export async function loadKnowledgeBase(
   knowledgeDir: string

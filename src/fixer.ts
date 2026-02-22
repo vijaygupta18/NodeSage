@@ -1,180 +1,177 @@
-import { Ollama } from "ollama";
 import * as fs from "fs/promises";
 import * as path from "path";
+import * as readline from "readline";
 import chalk from "chalk";
-import { Finding, ReviewResult } from "./reviewer.js";
-import { retrieveContext } from "./rag.js";
-
-const ollama = new Ollama();
-const DEFAULT_MODEL = "mistral";
-
-export interface FixResult {
-  filePath: string;
-  original: string;
-  fixed: string;
-  findings: Finding[];
-}
-
-function buildFixPrompt(
-  originalCode: string,
-  findings: Finding[],
-  language: string
-): string {
-  const issueList = findings
-    .filter((f) => f.severity === "CRITICAL" || f.severity === "WARNING")
-    .map(
-      (f, i) =>
-        `${i + 1}. [${f.severity}] ${f.title} (Lines ${f.startLine}-${f.endLine})\n   ${f.description}\n   Suggested fix: ${f.fix}`
-    )
-    .join("\n\n");
-
-  return `You are NodeSage, an expert Node.js code fixer.
-
-The following code has been reviewed and these issues were found:
-
-${issueList}
-
-Fix ALL the issues listed above in the code below. Rules:
-- Return ONLY the complete fixed code, nothing else
-- Do NOT add markdown fences, explanations, or comments about what you changed
-- Do NOT remove any existing functionality
-- Keep the same code style and structure
-- Only fix the issues listed above, don't refactor unrelated code
-- If a deprecated library is flagged, replace it with the modern equivalent
-
-Original code:
-${originalCode}`;
-}
-
-export async function fixFile(
-  result: ReviewResult,
-  model: string = DEFAULT_MODEL
-): Promise<FixResult | null> {
-  const actionableFindings = result.findings.filter(
-    (f) => f.severity === "CRITICAL" || f.severity === "WARNING"
-  );
-
-  if (actionableFindings.length === 0) {
-    return null;
-  }
-
-  const originalCode = await fs.readFile(result.filePath, "utf-8");
-  const ext = path.extname(result.filePath);
-  const language = [".ts", ".tsx"].includes(ext) ? "typescript" : "javascript";
-
-  const prompt = buildFixPrompt(originalCode, actionableFindings, language);
-
-  const response = await ollama.chat({
-    model,
-    messages: [{ role: "user", content: prompt }],
-    options: {
-      temperature: 0.1,
-      num_predict: 4096,
-    },
-  });
-
-  let fixedCode = response.message.content.trim();
-
-  // Strip markdown fences if the LLM wraps the code
-  fixedCode = stripMarkdownFences(fixedCode);
-
-  if (fixedCode === originalCode.trim()) {
-    return null;
-  }
-
-  return {
-    filePath: result.filePath,
-    original: originalCode,
-    fixed: fixedCode + "\n",
-    findings: actionableFindings,
-  };
-}
+import { retrieveContext, formatContext } from "./retriever.js";
+import { chat, type Message } from "./llm.js";
+import { detectLanguage } from "./languages.js";
+import { printDiff } from "./reporter.js";
+import type { FixResult } from "./types.js";
 
 function stripMarkdownFences(code: string): string {
-  // Remove any preamble text before the first code fence or code line
-  // e.g., "Here is the fixed code:\n```javascript\n..."
   const fenceMatch = code.match(/```[\w]*\n([\s\S]*?)```/);
   if (fenceMatch) {
     return fenceMatch[1].trim();
   }
-  // Remove lines like "Here is the fixed code:" before actual code
   code = code.replace(/^(?:Here|Below|The following)[\s\S]*?:\s*\n/, "");
-  // Remove opening fence like ```javascript or ```js or ```
   code = code.replace(/^```[\w]*\n?/, "");
-  // Remove closing fence
   code = code.replace(/\n?```\s*$/, "");
   return code.trim();
 }
 
-export async function applyFix(fixResult: FixResult): Promise<string> {
-  const backupPath = fixResult.filePath + ".bak";
-  await fs.writeFile(backupPath, fixResult.original, "utf-8");
-  await fs.writeFile(fixResult.filePath, fixResult.fixed, "utf-8");
-  return backupPath;
+function buildFixPrompt(
+  originalCode: string,
+  context: string,
+  language: string
+): string {
+  return `You are NodeSage, an expert code reviewer and fixer.
+
+Given these best practices and related code:
+---
+${context}
+---
+
+Review this ${language} file and fix any issues related to security, performance, error handling, and best practices.
+
+Rules:
+- Return ONLY the complete fixed code, nothing else
+- Do NOT add markdown fences, explanations, or comments about what you changed
+- Do NOT remove any existing functionality
+- Keep the same code style and structure
+- Only fix real issues, don't refactor working code
+
+Code to fix:
+${originalCode}`;
 }
 
-export function printDiff(fixResult: FixResult): void {
-  const originalLines = fixResult.original.split("\n");
-  const fixedLines = fixResult.fixed.split("\n");
-  const relPath = path.basename(fixResult.filePath);
+export async function fixFile(
+  filePath: string,
+  options: { model?: string } = {}
+): Promise<void> {
+  const absPath = path.resolve(filePath);
+  const language = detectLanguage(absPath);
+  const originalCode = await fs.readFile(absPath, "utf-8");
+  const model = options.model ?? "mistral";
 
-  console.log(
-    chalk.bold.underline(`\n  📝 ${relPath}`) +
-      chalk.dim(` (${fixResult.findings.length} fixes applied)`)
+  console.log(chalk.dim(`  File: ${absPath}`));
+  console.log(chalk.dim(`  Language: ${language}`));
+  console.log(chalk.cyan("\n  Analyzing code...\n"));
+
+  // Retrieve relevant knowledge
+  const context = await retrieveContext(originalCode, {
+    topK: 5,
+    type: "knowledge",
+  });
+  const contextStr = formatContext(context);
+
+  const prompt = buildFixPrompt(originalCode, contextStr, language);
+
+  console.log(chalk.cyan("  Generating fixes...\n"));
+
+  const response = await chat(
+    [{ role: "user", content: prompt }],
+    model,
+    { temperature: 0.1, num_predict: 4096 }
   );
-  console.log();
 
-  // Simple line-by-line diff
-  const maxLines = Math.max(originalLines.length, fixedLines.length);
-  let diffCount = 0;
-  const contextLines = 2;
-  const changedLines: Set<number> = new Set();
+  let fixedCode = stripMarkdownFences(response);
 
-  // First pass: find changed lines
-  for (let i = 0; i < maxLines; i++) {
-    const orig = originalLines[i] ?? "";
-    const fixed = fixedLines[i] ?? "";
-    if (orig !== fixed) {
-      changedLines.add(i);
-      // Add context lines
-      for (let c = Math.max(0, i - contextLines); c <= Math.min(maxLines - 1, i + contextLines); c++) {
-        changedLines.add(c);
-      }
-    }
-  }
-
-  if (changedLines.size === 0) {
-    console.log(chalk.dim("    No changes detected."));
+  if (fixedCode === originalCode.trim()) {
+    console.log(chalk.green("  No issues found. Code looks good!\n"));
     return;
   }
 
-  // Second pass: print diff with context
-  let lastPrinted = -2;
-  const sortedLines = [...changedLines].sort((a, b) => a - b);
+  // Show diff
+  printDiff(originalCode, fixedCode + "\n", path.relative(process.cwd(), absPath));
 
-  for (const i of sortedLines) {
-    if (i > lastPrinted + 1) {
-      console.log(chalk.dim("    ..."));
-    }
-    lastPrinted = i;
+  // Ask user to apply
+  const rl = readline.createInterface({
+    input: process.stdin,
+    output: process.stdout,
+  });
 
-    const orig = originalLines[i] ?? "";
-    const fixed = fixedLines[i] ?? "";
-    const lineNum = String(i + 1).padStart(4);
+  const answer = await new Promise<string>((resolve) => {
+    rl.question(chalk.cyan("\n  Apply fixes? (y/n) "), resolve);
+  });
+  rl.close();
 
-    if (orig !== fixed) {
-      diffCount++;
-      if (orig) {
-        console.log(chalk.red(`  ${lineNum} - ${orig}`));
-      }
-      if (fixed) {
-        console.log(chalk.green(`  ${lineNum} + ${fixed}`));
-      }
-    } else {
-      console.log(chalk.dim(`  ${lineNum}   ${orig}`));
-    }
+  if (answer.toLowerCase() === "y" || answer.toLowerCase() === "yes") {
+    const backupPath = absPath + ".bak";
+    await fs.writeFile(backupPath, originalCode, "utf-8");
+    await fs.writeFile(absPath, fixedCode + "\n", "utf-8");
+    console.log(chalk.green(`\n  Fixed! Backup saved to ${path.basename(backupPath)}\n`));
+  } else {
+    console.log(chalk.dim("\n  Fix cancelled.\n"));
+  }
+}
+
+export async function fixFileInteractive(
+  filePath: string,
+  conversationHistory: Message[],
+  model: string
+): Promise<void> {
+  const absPath = path.resolve(filePath);
+  const language = detectLanguage(absPath);
+
+  let originalCode: string;
+  try {
+    originalCode = await fs.readFile(absPath, "utf-8");
+  } catch {
+    console.log(chalk.red(`\n  Cannot read file: ${filePath}\n`));
+    return;
   }
 
-  console.log();
-  console.log(chalk.dim(`    ${diffCount} line(s) changed`));
+  console.log(chalk.cyan(`\n  Generating fix for ${path.basename(absPath)}...\n`));
+
+  // Build prompt with conversation context
+  const fixPrompt = `Based on our conversation, fix the following ${language} file.
+
+Rules:
+- Return ONLY the complete fixed code, nothing else
+- Do NOT add markdown fences or explanations
+- Do NOT remove existing functionality
+- Only fix real issues
+
+File: ${filePath}
+\`\`\`${language}
+${originalCode}
+\`\`\``;
+
+  const messages: Message[] = [
+    ...conversationHistory.slice(-10), // Last 5 exchanges for context
+    { role: "user", content: fixPrompt },
+  ];
+
+  const response = await chat(messages, model, {
+    temperature: 0.1,
+    num_predict: 4096,
+  });
+
+  let fixedCode = stripMarkdownFences(response);
+
+  if (fixedCode === originalCode.trim()) {
+    console.log(chalk.green("  No issues found. Code looks good!\n"));
+    return;
+  }
+
+  printDiff(originalCode, fixedCode + "\n", path.relative(process.cwd(), absPath));
+
+  const rl = readline.createInterface({
+    input: process.stdin,
+    output: process.stdout,
+  });
+
+  const answer = await new Promise<string>((resolve) => {
+    rl.question(chalk.cyan("\n  Apply fixes? (y/n) "), resolve);
+  });
+  rl.close();
+
+  if (answer.toLowerCase() === "y" || answer.toLowerCase() === "yes") {
+    const backupPath = absPath + ".bak";
+    await fs.writeFile(backupPath, originalCode, "utf-8");
+    await fs.writeFile(absPath, fixedCode + "\n", "utf-8");
+    console.log(chalk.green(`\n  Fixed! Backup saved to ${path.basename(backupPath)}\n`));
+  } else {
+    console.log(chalk.dim("\n  Fix cancelled.\n"));
+  }
 }

@@ -1,44 +1,25 @@
 # NodeSage
 
-RAG-powered Node.js code reviewer and fixer CLI. Runs entirely locally using Ollama — zero API costs, your code never leaves your machine.
+RAG-powered repo Q&A and code fixer CLI. Train it on any codebase, ask anything about the code, and fix issues — all locally using Ollama. Zero API costs, your code never leaves your machine.
 
-Unlike generic AI reviewers or static linters, NodeSage uses RAG to match your code against a curated knowledge base of Node.js security rules, performance patterns, and best practices. Teams can add their own standards too.
+Supports all major languages: JavaScript, TypeScript, Python, Go, Rust, Java, C/C++, Ruby, PHP, C#, Swift, Kotlin, Scala, and Shell.
 
 ## How It Works
 
 ```
-Your Code ──> Code Parser ──> Code Chunks
-                                   │
-                                   v
-  Ollama  <── RAG Engine <── Vector DB
- (review &    (retrieve      (embedded
-  fix code)    best match)    practices)
-      │
-      v
-  Terminal Report / Auto-Fix
+Your Repo ──> Smart Chunker ──> Code Chunks ──> Embeddings ──> Vector DB
+                                                                   │
+                                                                   v
+  You ──> "nodesage chat" ──> RAG Retriever ──> Ollama LLM ──> Answers / Fixes
 ```
 
-1. Parses your JS/TS files into chunks
-2. Embeds each chunk and retrieves the most relevant best practices from a local vector DB
-3. Sends code + matched practices to a local LLM for review
-4. Prints colored findings or auto-fixes the code
+1. **Train** — Scans your repo, chunks code by function/class boundaries, and embeds everything into a local vector DB
+2. **Chat** — Ask questions. NodeSage retrieves relevant code + best practices and answers using a local LLM
+3. **Fix** — Auto-generates fixes with diffs, backs up originals
 
-## Setup (Step by Step)
+## Setup
 
-### 1. Install Node.js
-
-Download and install Node.js v18+ from [nodejs.org](https://nodejs.org/), or use a version manager:
-
-```bash
-# Using nvm
-nvm install 18
-nvm use 18
-
-# Or using Homebrew (macOS)
-brew install node
-```
-
-### 2. Install Ollama
+### 1. Install Ollama
 
 ```bash
 # macOS
@@ -46,22 +27,17 @@ brew install ollama
 
 # Linux
 curl -fsSL https://ollama.com/install.sh | sh
-
-# Or download from https://ollama.com
 ```
 
-### 3. Start Ollama and pull models
+### 2. Start Ollama and pull models
 
 ```bash
-# Start the Ollama server (keep this running)
-ollama serve
-
-# In a new terminal, pull the required models
-ollama pull mistral            # LLM for code review (~4.1GB)
-ollama pull nomic-embed-text   # Embedding model for RAG (~274MB)
+ollama serve                    # Keep this running
+ollama pull mistral             # LLM for Q&A and fixes (~4.1GB)
+ollama pull nomic-embed-text    # Embedding model for RAG (~274MB)
 ```
 
-### 4. Install NodeSage
+### 3. Install NodeSage
 
 ```bash
 git clone <repo-url> && cd nodesage
@@ -70,99 +46,125 @@ npm run build
 npm link    # Makes 'nodesage' available globally
 ```
 
-### 5. Initialize the knowledge base
+## Usage
+
+### Train on a codebase
 
 ```bash
-nodesage init
+# Train on current directory
+nodesage train
+
+# Train on a specific repo
+nodesage train ./path/to/repo
+
+# Force full re-index (ignore cache)
+nodesage train --force
 ```
 
-Embeds the bundled best-practice docs into a local vector index (`.nodesage/index/`). Only needed once.
+Indexes all supported source files, embeds code chunks + bundled best practices into a local vector DB. Supports incremental updates — only re-embeds changed files on subsequent runs.
 
-### Review code
+### Chat with your code
 
 ```bash
-# Review a single file
-nodesage review ./src/app.js
-
-# Review an entire directory
-nodesage review ./src
+nodesage chat
 ```
 
-Prints colored findings with severity levels and fix suggestions:
+Starts an interactive session where you can ask anything about the trained codebase:
 
 ```
-  ●  CRITICAL  SQL Injection Vulnerability (L19-24)
-     User input is directly concatenated into SQL query string
-     Fix: Use parameterized queries: db.query('SELECT * FROM users WHERE id = $1', [userId])
-
-  ●  WARNING   No Error Handling on Async Operation (L47-51)
-     Missing try/catch block on async fetch
-     Fix: Wrap in try/catch or add .catch() handler
+  nodesage> what does the chunker module do?
+  nodesage> find potential security issues in the auth handler
+  nodesage> how does the database connection pool work?
+  nodesage> explain the error handling in src/api.ts
 ```
 
-### Auto-fix code
+Chat commands:
+- `/fix <file>` — Fix a file based on conversation context
+- `/clear` — Clear conversation history
+- `/context` — Show what code was retrieved for the last query
+- `/help` — Show available commands
+- `/quit` — Exit chat
+
+### Fix a file directly
 
 ```bash
-# Review and automatically fix issues
 nodesage fix ./src/app.js
 ```
 
-Reviews the code, generates fixes for CRITICAL and WARNING issues using the LLM, applies them, and shows a line-by-line diff. Original files are backed up as `.bak`.
-
-### Add custom team standards
-
-```bash
-nodesage add ./our-coding-standards.md
-```
-
-Embeds a custom markdown file into the knowledge base so reviews match against your team's rules too.
+Reviews the file against best practices, generates fixes, shows a diff, and asks before applying. Originals are backed up as `.bak`.
 
 ### Options
 
 ```bash
-nodesage review <path> --model <model>   # Use a different Ollama model
-nodesage init --force                     # Re-initialize the knowledge base
+nodesage train [path] --force         # Full re-index
+nodesage chat --model <model>         # Use a different Ollama model
+nodesage fix <file> --model <model>   # Use a different model for fixes
 ```
+
+## Supported Languages
+
+| Language | Extensions |
+|----------|-----------|
+| JavaScript | `.js`, `.jsx`, `.mjs`, `.cjs` |
+| TypeScript | `.ts`, `.tsx` |
+| Python | `.py` |
+| Go | `.go` |
+| Rust | `.rs` |
+| Java | `.java` |
+| C | `.c`, `.h` |
+| C++ | `.cpp`, `.cc`, `.cxx`, `.hpp` |
+| Ruby | `.rb` |
+| PHP | `.php` |
+| C# | `.cs` |
+| Swift | `.swift` |
+| Kotlin | `.kt` |
+| Scala | `.scala` |
+| Shell | `.sh`, `.bash`, `.zsh` |
 
 ## Bundled Knowledge Base
 
-5 curated docs covering common Node.js issues:
+5 curated docs covering common coding issues:
 
 | File | Covers |
 |------|--------|
-| `security.md` | SQL injection, command injection, prototype pollution, SSRF, path traversal, secrets, XSS |
+| `security.md` | SQL injection, command injection, prototype pollution, SSRF, path traversal, secrets |
 | `performance.md` | Event loop blocking, memory leaks, streams, N+1 queries, caching |
 | `error-handling.md` | Unhandled rejections, try/catch, custom errors, graceful shutdown |
 | `async-patterns.md` | Promise.all, async loops, race conditions, timeouts, cleanup |
 | `dependencies.md` | Lock files, audit, supply chain security, unused deps |
-
-## Tech Stack
-
-- **Runtime:** Node.js + TypeScript
-- **CLI:** Commander
-- **LLM:** Ollama (Mistral 7B)
-- **Embeddings:** Ollama (nomic-embed-text)
-- **Vector Store:** Vectra (local, file-based)
-- **Output:** Chalk (colored terminal)
 
 ## Project Structure
 
 ```
 nodesage/
 ├── src/
-│   ├── index.ts          # CLI entry point
-│   ├── parser.ts         # Code file reader + chunker
-│   ├── rag.ts            # RAG pipeline (embed + retrieve + prompt)
-│   ├── reviewer.ts       # LLM review logic + response parsing
-│   ├── fixer.ts          # LLM fix generation + diff + apply
-│   ├── reporter.ts       # Colored terminal output
+│   ├── index.ts          # CLI entry point (train, chat, fix commands)
+│   ├── types.ts          # Shared interfaces and types
+│   ├── languages.ts      # Language detection + boundary patterns
+│   ├── chunker.ts        # Smart multi-language code chunker
+│   ├── store.ts          # Vector store wrapper (Vectra)
+│   ├── embedder.ts       # Ollama embedding (single + batch)
+│   ├── retriever.ts      # RAG retrieval + context formatting
+│   ├── llm.ts            # Ollama LLM wrapper (chat + streaming)
+│   ├── trainer.ts        # Train command logic
+│   ├── chat.ts           # Interactive chat REPL
+│   ├── fixer.ts          # Fix command logic
+│   ├── reporter.ts       # Terminal output helpers
 │   └── knowledge/
-│       ├── loader.ts     # Markdown knowledge base parser
-│       └── store.ts      # Vectra vector store wrapper
+│       └── loader.ts     # Markdown knowledge base parser
 ├── knowledge-base/       # Curated best-practice markdown docs
 ├── package.json
 └── tsconfig.json
 ```
+
+## Tech Stack
+
+- **Runtime:** Node.js 18+ / TypeScript
+- **CLI:** Commander
+- **LLM:** Ollama (Mistral 7B default, any Ollama model)
+- **Embeddings:** Ollama (nomic-embed-text)
+- **Vector Store:** Vectra (local, file-based)
+- **Output:** Chalk (colored terminal)
 
 ## License
 
