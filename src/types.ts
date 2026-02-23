@@ -17,20 +17,39 @@ export type SupportedLanguage =
   | "elixir"
   | "erlang"
   | "shell"
+  | "lua"
+  | "perl"
+  | "r"
+  | "dart"
+  | "sql"
+  | "groovy"
+  | "clojure"
+  | "fsharp"
+  | "ocaml"
+  | "julia"
+  | "zig"
+  | "nim"
+  | "v"
+  | "crystal"
+  | "elm"
+  | "purescript"
+  | "terraform"
+  | "dockerfile"
+  | "makefile"
+  | "yaml"
+  | "toml"
+  | "markdown"
+  | "text"
   | "unknown";
 
 export interface ChunkMetadata {
-  type: "code" | "knowledge";
+  type: "code";
   text: string;
-  // Code-specific
-  filePath?: string;
-  language?: string;
-  startLine?: number;
-  endLine?: number;
-  chunkKind?: "function" | "class" | "block" | "imports" | "general";
-  // Knowledge-specific
-  source?: string;
-  section?: string;
+  filePath: string;
+  language: string;
+  startLine: number;
+  endLine: number;
+  chunkKind: "function" | "class" | "block" | "imports" | "general";
 }
 
 export interface CodeChunk {

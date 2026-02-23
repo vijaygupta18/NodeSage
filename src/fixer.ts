@@ -6,6 +6,7 @@ import { retrieveContext, formatContext } from "./retriever.js";
 import { chat, type Message } from "./llm.js";
 import { detectLanguage } from "./languages.js";
 import { printDiff } from "./reporter.js";
+import { loadConfig } from "./config.js";
 import type { FixResult } from "./types.js";
 
 function stripMarkdownFences(code: string): string {
@@ -48,19 +49,19 @@ export async function fixFile(
   filePath: string,
   options: { model?: string } = {}
 ): Promise<void> {
+  const config = await loadConfig();
   const absPath = path.resolve(filePath);
   const language = detectLanguage(absPath);
   const originalCode = await fs.readFile(absPath, "utf-8");
-  const model = options.model ?? "mistral";
+  const model = options.model ?? config.chatModel;
 
   console.log(chalk.dim(`  File: ${absPath}`));
   console.log(chalk.dim(`  Language: ${language}`));
   console.log(chalk.cyan("\n  Analyzing code...\n"));
 
-  // Retrieve relevant knowledge
+  // Retrieve relevant code context
   const context = await retrieveContext(originalCode, {
     topK: 5,
-    type: "knowledge",
   });
   const contextStr = formatContext(context);
 

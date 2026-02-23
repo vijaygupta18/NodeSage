@@ -46,11 +46,19 @@ export async function discoverFiles(targetPath: string): Promise<string[]> {
       // No .gitignore, that's fine
     }
 
-    const files = await glob(getFileGlobs(), {
-      cwd: absPath,
-      absolute: true,
-      ignore: ignorePatterns,
-    });
+    const globs = getFileGlobs();
+    const allFiles: string[] = [];
+    for (const pattern of globs) {
+      const matched = await glob(pattern, {
+        cwd: absPath,
+        absolute: true,
+        ignore: ignorePatterns,
+      });
+      allFiles.push(...matched);
+    }
+
+    // Deduplicate
+    const files = [...new Set(allFiles)];
 
     if (files.length === 0) {
       throw new Error(`No supported source files found in ${targetPath}`);

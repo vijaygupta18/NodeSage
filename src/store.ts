@@ -62,17 +62,10 @@ export async function addItemsBatch(
 
 export async function queryItems(
   queryVector: number[],
-  topK: number = 8,
-  filter?: { type?: "code" | "knowledge" }
+  topK: number = 8
 ): Promise<RetrievedContext[]> {
   const index = await ensureIndex();
-
-  let metadataFilter: Record<string, unknown> | undefined;
-  if (filter?.type) {
-    metadataFilter = { type: { $eq: filter.type } };
-  }
-
-  const results = await index.queryItems(queryVector, topK, metadataFilter);
+  const results = await index.queryItems(queryVector, topK);
 
   return results.map((r) => ({
     text: r.item.metadata.text as string,

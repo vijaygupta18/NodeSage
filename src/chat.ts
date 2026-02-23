@@ -3,10 +3,9 @@ import chalk from "chalk";
 import { retrieveContext, formatContext } from "./retriever.js";
 import { chatStream, type Message } from "./llm.js";
 import { fixFileInteractive } from "./fixer.js";
-import { printChatWelcome } from "./reporter.js";
+import { printChatWelcome, createSpinner, StreamRenderer } from "./reporter.js";
+import { loadConfig } from "./config.js";
 import type { RetrievedContext } from "./types.js";
-
-const MAX_HISTORY = 20; // messages (10 exchanges)
 
 const SYSTEM_PROMPT = `You are NodeSage, an AI assistant that deeply understands codebases. You have been trained on a codebase and have access to its source code and best practices.
 
@@ -15,16 +14,21 @@ When answering questions:
 - Explain code clearly and concisely
 - Suggest improvements when appropriate
 - If asked to fix code, explain what you would change and why
+- Use markdown formatting: code blocks with language tags, bold for emphasis, bullet points for lists
 - Be direct and avoid unnecessary verbosity`;
 
 export async function startChat(options: { model?: string }): Promise<void> {
-  const model = options.model ?? "mistral";
+  const config = await loadConfig();
+  let model = options.model ?? config.chatModel;
 
   printChatWelcome();
-  console.log(chalk.dim(`  Model: ${model}\n`));
+  console.log(
+    chalk.dim("  Model: ") + chalk.cyan(model) + "\n"
+  );
 
   const conversationHistory: Message[] = [];
   let lastContext: RetrievedContext[] = [];
+  let turnCount = 0;
 
   const rl = readline.createInterface({
     input: process.stdin,
@@ -33,7 +37,7 @@ export async function startChat(options: { model?: string }): Promise<void> {
 
   const prompt = (): Promise<string> =>
     new Promise((resolve) => {
-      rl.question(chalk.cyan("  nodesage> "), (answer) => {
+      rl.question(chalk.bold.cyan("\n  > "), (answer) => {
         resolve(answer);
       });
     });
@@ -43,7 +47,6 @@ export async function startChat(options: { model?: string }): Promise<void> {
     try {
       input = await prompt();
     } catch {
-      // EOF or closed
       break;
     }
 
@@ -57,44 +60,72 @@ export async function startChat(options: { model?: string }): Promise<void> {
       switch (cmd) {
         case "/quit":
         case "/exit":
-          console.log(chalk.dim("\n  Goodbye!\n"));
+          console.log(
+            chalk.dim("\n  ──────────────────────────────────────")
+          );
+          console.log(chalk.dim(`  Session ended. ${turnCount} exchanges.\n`));
           rl.close();
           return;
 
         case "/help":
           console.log();
-          console.log(chalk.dim("  Commands:"));
-          console.log(chalk.dim("    /fix <file>  - Fix a specific file"));
-          console.log(chalk.dim("    /clear       - Clear conversation history"));
-          console.log(chalk.dim("    /context     - Show last retrieved context"));
-          console.log(chalk.dim("    /help        - Show this help"));
-          console.log(chalk.dim("    /quit        - Exit chat"));
+          console.log(chalk.dim("  ──────────────────────────────────────"));
+          console.log(chalk.bold.white("  Available Commands"));
           console.log();
+          console.log(
+            chalk.dim("    ") + chalk.cyan("/fix <file>") + chalk.dim("      Fix a specific file")
+          );
+          console.log(
+            chalk.dim("    ") + chalk.cyan("/model [name]") + chalk.dim("    Switch or show current model")
+          );
+          console.log(
+            chalk.dim("    ") + chalk.cyan("/clear") + chalk.dim("           Clear conversation history")
+          );
+          console.log(
+            chalk.dim("    ") + chalk.cyan("/context") + chalk.dim("         Show last retrieved context")
+          );
+          console.log(
+            chalk.dim("    ") + chalk.cyan("/help") + chalk.dim("            Show this help")
+          );
+          console.log(
+            chalk.dim("    ") + chalk.cyan("/quit") + chalk.dim("            Exit chat")
+          );
+          console.log(chalk.dim("  ──────────────────────────────────────"));
           continue;
 
         case "/clear":
           conversationHistory.length = 0;
           lastContext = [];
+          turnCount = 0;
           console.log(chalk.dim("\n  Conversation cleared.\n"));
+          continue;
+
+        case "/model":
+          if (args.length === 0) {
+            console.log(chalk.dim("\n  Current model: ") + chalk.cyan(model));
+            console.log(chalk.dim("  Usage: /model <name>  (e.g. /model llama3.1:8b)\n"));
+          } else {
+            model = args[0];
+            console.log(chalk.green("\n  Switched to ") + chalk.cyan(model) + "\n");
+          }
           continue;
 
         case "/context":
           if (lastContext.length === 0) {
             console.log(chalk.dim("\n  No context retrieved yet.\n"));
           } else {
-            console.log(chalk.dim("\n  Last retrieved context:"));
+            console.log();
+            console.log(chalk.dim("  ──────────────────────────────────────"));
+            console.log(chalk.bold.white(`  Retrieved Context (${lastContext.length} chunks)`));
+            console.log();
             for (const ctx of lastContext) {
-              const label =
-                ctx.metadata.type === "code"
-                  ? `${ctx.metadata.filePath} L${ctx.metadata.startLine}-${ctx.metadata.endLine}`
-                  : `${ctx.metadata.source} - ${ctx.metadata.section}`;
+              const label = `${ctx.metadata.filePath} L${ctx.metadata.startLine}-${ctx.metadata.endLine}`;
+              const score = ctx.score.toFixed(3);
               console.log(
-                chalk.dim(`    [${ctx.metadata.type}] `) +
-                  chalk.white(label) +
-                  chalk.dim(` (score: ${ctx.score.toFixed(3)})`)
+                `  ${chalk.green("▸")} ${chalk.white(label)} ${chalk.dim(`(${score})`)}`
               );
             }
-            console.log();
+            console.log(chalk.dim("  ──────────────────────────────────────"));
           }
           continue;
 
@@ -120,19 +151,23 @@ export async function startChat(options: { model?: string }): Promise<void> {
 
     // Normal question: retrieve context and stream response
     try {
-      lastContext = await retrieveContext(trimmed, { topK: 8, type: "both" });
+      // Show spinner while retrieving and thinking
+      const spinner = createSpinner("Searching codebase...");
+      spinner.start();
+
+      lastContext = await retrieveContext(trimmed, { topK: config.topK });
       const contextStr = formatContext(lastContext);
+
+      spinner.update("Thinking...");
 
       // Build messages for LLM
       const messages: Message[] = [
         { role: "system", content: SYSTEM_PROMPT },
       ];
 
-      // Add conversation history (sliding window)
-      const historySlice = conversationHistory.slice(-MAX_HISTORY);
+      const historySlice = conversationHistory.slice(-config.contextWindow);
       messages.push(...historySlice);
 
-      // Add context + user question
       if (contextStr) {
         messages.push({
           role: "system",
@@ -141,19 +176,33 @@ export async function startChat(options: { model?: string }): Promise<void> {
       }
       messages.push({ role: "user", content: trimmed });
 
-      // Stream response
-      process.stdout.write(chalk.dim("\n  "));
+      // Stream response with real-time rendering
       let fullResponse = "";
+      const renderer = new StreamRenderer();
+      let firstToken = true;
 
       for await (const token of chatStream(messages, model)) {
-        process.stdout.write(token);
+        if (firstToken) {
+          spinner.stop();
+          console.log();
+          firstToken = false;
+        }
         fullResponse += token;
+        renderer.write(token);
       }
-      process.stdout.write("\n\n");
+
+      if (firstToken) {
+        // No tokens received
+        spinner.stop();
+      }
+
+      renderer.flush();
+      console.log();
 
       // Save to history
       conversationHistory.push({ role: "user", content: trimmed });
       conversationHistory.push({ role: "assistant", content: fullResponse });
+      turnCount++;
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       console.log(chalk.red(`\n  Error: ${message}\n`));

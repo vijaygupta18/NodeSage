@@ -1,8 +1,7 @@
 import * as path from "path";
 import * as fs from "fs/promises";
-import { fileURLToPath } from "url";
 import chalk from "chalk";
-import { discoverFiles, chunkAllFiles, chunkFile } from "./chunker.js";
+import { discoverFiles, chunkAllFiles } from "./chunker.js";
 import { embedTexts } from "./embedder.js";
 import {
   createFreshIndex,
@@ -12,13 +11,17 @@ import {
   loadManifest,
   saveManifest,
 } from "./store.js";
-import { loadKnowledgeBase } from "./knowledge/loader.js";
 import { printProgress, printTrainSummary } from "./reporter.js";
 import type { ChunkMetadata, CodeChunk, TrainManifest } from "./types.js";
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-const EMBED_BATCH_SIZE = 20;
+const EMBED_BATCH_SIZE = 100;
+
+// Prepend file path and context to chunk text for better embeddings
+function buildEmbeddingText(chunk: CodeChunk): string {
+  const relPath = path.relative(process.cwd(), chunk.filePath);
+  const kind = chunk.chunkKind !== "general" ? ` (${chunk.chunkKind})` : "";
+  return `File: ${relPath}${kind}\n\n${chunk.content}`;
+}
 
 export async function train(
   targetPath: string,
@@ -78,14 +81,15 @@ export async function train(
   );
   console.log(chalk.dim(`\n  ${chunks.length} code chunks created\n`));
 
-  // Embed and store code chunks in batches
+  // Embed and store code chunks in batches with concurrency
   if (chunks.length > 0) {
     console.log(chalk.cyan("  Embedding code..."));
     let embedded = 0;
 
     for (let i = 0; i < chunks.length; i += EMBED_BATCH_SIZE) {
       const batch = chunks.slice(i, i + EMBED_BATCH_SIZE);
-      const texts = batch.map((c) => c.content);
+      // Build embedding text with file path context
+      const texts = batch.map(buildEmbeddingText);
       const vectors = await embedTexts(texts);
 
       const items = batch.map((chunk, idx) => ({
@@ -109,41 +113,6 @@ export async function train(
     console.log();
   }
 
-  // Embed knowledge base (only on fresh index)
-  let knowledgeCount = 0;
-  if (!isIncremental) {
-    console.log(chalk.cyan("\n  Embedding knowledge base..."));
-    const knowledgeDir = path.resolve(__dirname, "..", "knowledge-base");
-
-    try {
-      const knowledgeItems = await loadKnowledgeBase(knowledgeDir);
-
-      for (let i = 0; i < knowledgeItems.length; i += EMBED_BATCH_SIZE) {
-        const batch = knowledgeItems.slice(i, i + EMBED_BATCH_SIZE);
-        const texts = batch.map((k) => k.text);
-        const vectors = await embedTexts(texts);
-
-        const items = batch.map((k, idx) => ({
-          text: k.text,
-          metadata: {
-            type: "knowledge" as const,
-            text: k.text,
-            source: k.source,
-            section: k.section,
-          } satisfies ChunkMetadata,
-          vector: vectors[idx],
-        }));
-
-        await addItemsBatch(items);
-        knowledgeCount += batch.length;
-        printProgress(knowledgeCount, knowledgeItems.length, "Knowledge");
-      }
-      console.log();
-    } catch {
-      console.log(chalk.yellow("\n  Knowledge base not found, skipping.\n"));
-    }
-  }
-
   // Save manifest
   const newManifest: TrainManifest = {
     version: 1,
@@ -151,12 +120,10 @@ export async function train(
     files: {},
   };
 
-  // Carry forward unchanged entries from previous manifest
   if (manifest) {
     Object.assign(newManifest.files, manifest.files);
   }
 
-  // Update entries for processed files
   for (const file of filesToProcess) {
     const stat = await fs.stat(file);
     const fileChunks = chunks.filter((c) => c.filePath === file);
@@ -172,7 +139,7 @@ export async function train(
   printTrainSummary({
     files: filesToProcess.length,
     codeChunks: chunks.length,
-    knowledgeChunks: knowledgeCount,
+    knowledgeChunks: 0,
     elapsed,
   });
 }
