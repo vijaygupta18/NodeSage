@@ -13,6 +13,9 @@ export type SupportedLanguage =
   | "swift"
   | "kotlin"
   | "scala"
+  | "haskell"
+  | "elixir"
+  | "erlang"
   | "shell"
   | "unknown";
 

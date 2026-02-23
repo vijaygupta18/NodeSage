@@ -26,6 +26,12 @@ const EXTENSION_MAP = new Map<string, SupportedLanguage>([
   [".kt", "kotlin"],
   [".kts", "kotlin"],
   [".scala", "scala"],
+  [".hs", "haskell"],
+  [".lhs", "haskell"],
+  [".ex", "elixir"],
+  [".exs", "elixir"],
+  [".erl", "erlang"],
+  [".hrl", "erlang"],
   [".sh", "shell"],
   [".bash", "shell"],
   [".zsh", "shell"],
@@ -59,6 +65,9 @@ export function getIgnorePatterns(): string[] {
     "**/bin/**",
     "**/obj/**",
     "**/.nodesage/**",
+    "**/.stack-work/**",
+    "**/.cabal-sandbox/**",
+    "**/_build/**",
     "**/*.lock",
     "**/package-lock.json",
   ];
@@ -83,6 +92,9 @@ const BOUNDARY_PATTERNS: Record<SupportedLanguage, RegExp> = {
   swift: /^\s*(func\s|class\s|struct\s|enum\s|protocol\s|extension\s)/,
   kotlin: /^\s*(fun\s|class\s|object\s|interface\s|data\s+class\s)/,
   scala: /^\s*(def\s|class\s|object\s|trait\s|case\s+class\s)/,
+  haskell: /^\w+\s*::|\b(module|data|type|newtype|class|instance|where)\s/,
+  elixir: /^\s*(def\s|defp\s|defmodule\s|defimpl\s|defprotocol\s)/,
+  erlang: /^-module\(|^\w+\s*\(/,
   shell: /^\w+\s*\(\s*\)\s*\{|^function\s+\w+/,
   unknown: /^(function|class|def|fn|pub|export)\s/,
 };
@@ -107,6 +119,9 @@ const IMPORT_PATTERNS: Record<string, RegExp> = {
   swift: /^\s*import\s/,
   kotlin: /^\s*import\s/,
   scala: /^\s*import\s/,
+  haskell: /^\s*import\s/,
+  elixir: /^\s*(import\s|alias\s|use\s|require\s)/,
+  erlang: /^-include/,
   shell: /^\s*(source\s|\.?\s)/,
 };
 

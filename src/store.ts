@@ -1,9 +1,10 @@
 import { LocalIndex } from "vectra";
 import * as path from "path";
+import * as os from "os";
 import * as fs from "fs/promises";
 import type { ChunkMetadata, RetrievedContext, TrainManifest } from "./types.js";
 
-const NODESAGE_DIR = path.join(process.cwd(), ".nodesage");
+const NODESAGE_DIR = path.join(os.homedir(), ".nodesage");
 const INDEX_DIR = path.join(NODESAGE_DIR, "index");
 const MANIFEST_PATH = path.join(NODESAGE_DIR, "manifest.json");
 
